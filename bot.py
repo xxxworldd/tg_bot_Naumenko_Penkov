@@ -2,146 +2,173 @@ import telebot
 import random
 from db_manager import DBManager
 
-TOKEN = '7749208433:AAGNzzljarO0UAU2akle7muZY-N2N9Gd5pA'
+# Токен вашего бота от BotFather
+TOKEN = "7749208433:AAGNzzljarO0UAU2akle7muZY-N2N9Gd5pA"
+
+# Инициализация бота
 bot = telebot.TeleBot(TOKEN)
 
-# Подключение к базе данных
+# Инициализация базы данных
 db = DBManager()
 
-# Приветствия
-greetings = [
-    "Здарова!",
-    "Ку!",
-    "Доброго времени суток!",
-    "Приветствую!",
-    "Ассаламу алейкум!"
-]
+# Пример назначения роли по chat_id
+roles = {
+    865173045: "Руководитель",  # Чат с ID 865173045 - роль "Руководитель"
+    830832627: "Управляющий",   # Чат с ID 830832627 - роль "Управляющий"
+}
 
-# Стандартные команды
+# Получаем роль для chat_id
+def get_role_for_chat(chat_id):
+    return roles.get(chat_id, "Пользователь")  # Если chat_id нет в словаре, возвращаем "Пользователь"
+
+# Проверка, является ли пользователь "Руководителем"
+def is_leader(chat_id):
+    return get_role_for_chat(chat_id) == "Руководитель"
+
+# Словарь для хранения статуса редактирования
+edit_response_status = {}
+
+# Команда /start
 @bot.message_handler(commands=['start'])
-def send_greeting(message):
+def start_command(message):
     chat_id = message.chat.id
-    username = message.chat.username or "Пользователь"
+    role = get_role_for_chat(chat_id)
 
-    # Регистрация пользователя и назначение роли по умолчанию (гость)
-    db.register_user(chat_id, username)
-    db.set_role(chat_id, 'гость')
+    bot.reply_to(message, f"Привет! Я бот, который загадывает числа. Ваша роль: {role}. Введи /game, чтобы начать игру!")
 
-    db.save_message(chat_id, "Приветствие отправлено.")
-    print(f"Отправлено приветствие для {chat_id}")
-
-    # Отправляем приветствие
-    bot.send_message(chat_id, random.choice(greetings))
-
-
+# Команда /game
 @bot.message_handler(commands=['game'])
-def start_game(message):
+def game_command(message):
     chat_id = message.chat.id
-    print(f"Пользователь {chat_id} запустил игру.")  # Для отладки
+    role = get_role_for_chat(chat_id)
 
-    # Проверяем состояние игры
-    game_state = db.get_game_state(chat_id)
-    if game_state and game_state['game_active'] == 1:
-        bot.send_message(chat_id, "Игра уже запущена! Угадайте число.")
-    else:
-        target_number = db.start_game(chat_id)
-        if target_number:
-            bot.send_message(chat_id, "Игра началась! Угадайте число от 1 до 100. Напишите 'стоп', чтобы выйти.")
-        else:
-            bot.send_message(chat_id, "Ошибка при запуске игры. Попробуйте позже.")
-
-
-# Обработчик чисел, которые пользователь вводит во время игры
-@bot.message_handler(func=lambda message: db.get_game_state(message.chat.id) is not None)
-def play_game(message):
-    chat_id = message.chat.id
-    game_state = db.get_game_state(chat_id)
-
-    # Проверяем, активна ли игра
-    if not game_state or not game_state.get("game_active"):
-        bot.send_message(chat_id, "Игра не активна. Запустите игру с командой /game.")
+    if role == "Пользователь":
+        bot.reply_to(message, "У вас нет прав для начала игры. Только Руководитель и Управляющий могут начать игру.")
         return
 
-    if message.text.lower() == 'стоп':
+    game_number = db.get_game_number(chat_id)
+
+    if game_number:
+        bot.reply_to(message, "Игра уже начата! Угадывай число или введи /stop, чтобы завершить игру.")
+    else:
+        number = random.randint(1, 100)
+        db.start_game(chat_id, number)
+        bot.reply_to(message, "Я загадал число от 1 до 100. Попробуй угадать!")
+
+# Команда /stop
+@bot.message_handler(commands=['stop'])
+def stop_command(message):
+    chat_id = message.chat.id
+    role = get_role_for_chat(chat_id)
+
+    if role == "Пользователь":
+        bot.reply_to(message, "У вас нет прав для остановки игры. Только Руководитель и Управляющий могут остановить игру.")
+        return
+
+    game_number = db.get_game_number(chat_id)
+
+    if game_number:
         db.stop_game(chat_id)
-        bot.send_message(chat_id, "Игра завершена.")
-        db.save_message(chat_id, "Игра остановлена.")
+        bot.reply_to(message, "Игра завершена. Если хочешь сыграть снова, введи /game.")
+    else:
+        bot.reply_to(message, "Ты пока не начал игру. Введи /game, чтобы начать!")
+
+# Команда /role
+@bot.message_handler(commands=['role'])
+def role_command(message):
+    chat_id = message.chat.id
+    role = get_role_for_chat(chat_id)
+
+    bot.reply_to(message, f"Ваша роль: {role}")
+
+# Команда /chatid
+@bot.message_handler(commands=['chatid'])
+def chatid_command(message):
+    chat_id = message.chat.id
+    role = get_role_for_chat(chat_id)
+
+    bot.reply_to(message, f"ID этого чата: {chat_id}\nВаша роль: {role}")
+
+# Команда /editresponse (Только для "Управляющего" и "Руководителя")
+@bot.message_handler(commands=['editresponse'])
+def edit_response(message):
+    chat_id = message.chat.id
+    role = get_role_for_chat(chat_id)
+
+    if not (get_role_for_chat(chat_id) in ["Управляющий", "Руководитель"]):  # Проверка, является ли пользователь "Управляющим" или "Руководителем"
+        bot.reply_to(message, "У вас нет прав для редактирования ответов бота. Только Руководитель и Управляющий могут редактировать.")
+        return
+
+    # Помечаем, что этот чат сейчас ожидает новый ответ
+    edit_response_status[chat_id] = True
+    bot.reply_to(message, "Введите новый ответ для игры: (например, 'Я загадал число, попробуй угадать!')")
+
+# Обработка новых сообщений для редактирования ответа
+@bot.message_handler(func=lambda message: message.chat.id in edit_response_status and edit_response_status[message.chat.id])
+def handle_new_response(message):
+    chat_id = message.chat.id
+
+    # Получаем новый ответ
+    new_response = message.text
+
+    # Здесь можно добавить логику для сохранения нового ответа в базе данных или в другом месте
+    # Например, можно обновить ответ в базе данных, если нужно
+
+    # Обновляем статус редактирования
+    edit_response_status[chat_id] = False  # Ожидание нового ответа завершено
+
+    bot.reply_to(message, f"Ответ для игры обновлен: {new_response}")
+
+# Команда /stats (Только для "Руководителя")
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
+    chat_id = message.chat.id
+    role = get_role_for_chat(chat_id)
+
+    if not is_leader(chat_id):  # Проверка, является ли пользователь "Руководителем"
+        bot.reply_to(message, "У вас нет прав для получения статистики. Только Руководитель может получить статистику.")
+        return
+
+    # Получаем статистику
+    total_users = db.get_user_count()  # Количество пользователей
+    total_games = db.get_all_games_count()  # Количество начатых игр
+    won_games = db.get_won_games_count()  # Количество выигранных игр
+
+    # Логируем статистику
+    print(f"Количество пользователей: {total_users}")
+    print(f"Количество начатых игр: {total_games}")
+    print(f"Количество выигранных игр: {won_games}")
+
+    # Отправляем статистику пользователю
+    bot.reply_to(message, f"Общая статистика:\n"
+                          f"Количество пользователей: {total_users}\n"
+                          f"Количество начатых игр: {total_games}\n"
+                          f"Количество выигранных игр: {won_games}")
+
+# Обработка текстовых сообщений (угадывание числа)
+@bot.message_handler(func=lambda message: True)
+def handle_guess(message):
+    chat_id = message.chat.id
+    game_number = db.get_game_number(chat_id)
+
+    if not game_number:
+        bot.reply_to(message, "Игра не начата. Введи /game, чтобы начать!")
         return
 
     try:
-        guess = int(message.text)  # Проверяем вводимое число
-        target_number = game_state['target_number']  # Получаем загаданное число из базы данных
-        print(f"Пользователь {chat_id} ввел число {guess}. Загаданное число: {target_number}.")
-
-        if guess < target_number:
-            bot.send_message(chat_id, "Загаданное число больше. Попробуйте снова.")
-        elif guess > target_number:
-            bot.send_message(chat_id, "Загаданное число меньше. Попробуйте снова.")
-        else:
-            bot.send_message(chat_id, "Поздравляю! Вы угадали число!")
-            db.stop_game(chat_id)  # Завершаем игру в базе данных
-            db.save_message(chat_id, "Игра завершена.")
-            bot.send_message(chat_id, "Игра завершена. Используйте /game для новой игры.")
+        guess = int(message.text)
     except ValueError:
-        bot.send_message(chat_id, "Введите корректное число или напишите 'стоп' для завершения игры.")
-    except Exception as e:
-        bot.send_message(chat_id, "Произошла ошибка. Попробуйте снова.")
-        print(f"Ошибка в play_game: {e}")
+        bot.reply_to(message, "Пожалуйста, введи число!")
+        return
 
-
-# Команды для завершения игры
-@bot.message_handler(commands=['stop'])
-def stop_game(message):
-    chat_id = message.chat.id
-    db.stop_game(chat_id)
-    bot.send_message(chat_id, "Игра завершена.")
-    db.save_message(chat_id, "Игра остановлена.")
-
-
-# Команда для получения chat_id
-@bot.message_handler(commands=['chatid'])
-def send_chat_id(message):
-    chat_id = message.chat.id
-    bot.send_message(chat_id, f"Ваш chat_id: {chat_id}")
-    db.save_message(chat_id, f"Пользователь запросил chat_id: {chat_id}")
-    print(f"Chat ID: {chat_id}")  # Отладка, чтобы проверить, что chat_id получен правильно
-
-
-# Команда для получения роли пользователя
-@bot.message_handler(commands=['role'])
-def get_role(message):
-    chat_id = message.chat.id
-    role = db.get_role(chat_id)
-    if role:
-        bot.send_message(chat_id, f"Ваша роль: {role}")
+    if guess < game_number:
+        bot.reply_to(message, "Загаданное число больше.")
+    elif guess > game_number:
+        bot.reply_to(message, "Загаданное число меньше.")
     else:
-        bot.send_message(chat_id, "Вы не зарегистрированы в системе.")
+        # Игра выиграна
+        bot.reply_to(message, "Поздравляю! Ты угадал число. Введи /game, чтобы сыграть снова.")
+        db.stop_game(chat_id, won=True)  # Помечаем игру как выигранную
 
-
-# Команда для изменения роли пользователем (только для администратора)
-@bot.message_handler(commands=['setrole'])
-def set_role(message):
-    chat_id = message.chat.id
-    admin_chat_id = 865173045  # Здесь укажите свой chat_id, чтобы только вы могли изменять роли
-
-    if chat_id == admin_chat_id:
-        parts = message.text.split()
-        if len(parts) == 3:
-            target_chat_id = int(parts[1])
-            role_name = parts[2]
-
-            valid_roles = ['гость', 'управляющий', 'руководитель']
-            if role_name not in valid_roles:
-                bot.send_message(chat_id, "Недопустимая роль.")
-                return
-
-            db.set_role(target_chat_id, role_name)
-            bot.send_message(chat_id, f"Роль пользователя {target_chat_id} изменена на {role_name}.")
-        else:
-            bot.send_message(chat_id, "Неверный формат команды. Используйте /setrole <chat_id> <role>")
-    else:
-        bot.send_message(chat_id, "У вас нет прав для изменения ролей.")
-
-
-# Основной цикл бота
-bot.polling(none_stop=True, interval=3, timeout=60)
+# Запуск бота
+bot.polling(none_stop=True)
