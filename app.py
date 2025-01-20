@@ -18,7 +18,15 @@ class DBManager:
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id INTEGER NOT NULL UNIQUE,
-                username TEXT
+                username TEXT,
+                role TEXT DEFAULT 'Пользователь'
+            );
+            ''')
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS games (
+                chat_id INTEGER PRIMARY KEY,
+                number INTEGER,
+                won BOOLEAN DEFAULT 0
             );
             ''')
             conn.commit()
@@ -27,32 +35,39 @@ class DBManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT id, chat_id, username FROM users;')
+                cursor.execute('SELECT id, chat_id, username, role FROM users;')
                 users = cursor.fetchall()  # Получаем все записи пользователей
                 return users
         except sqlite3.Error as e:
             print(f"Ошибка при извлечении пользователей: {e}")
             return []
 
+    def get_user_count(self):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM users;')
+                count = cursor.fetchone()[0]
+                return count
+        except sqlite3.Error as e:
+            print(f"Ошибка при извлечении количества пользователей: {e}")
+            return 0
+
+    def get_won_games_count(self):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM games WHERE won = 1;')
+                count = cursor.fetchone()[0]
+                return count
+        except sqlite3.Error as e:
+            print(f"Ошибка при извлечении количества выигранных игр: {e}")
+            return 0
+
 # Flask-приложение
 app = Flask(__name__)
 db = DBManager()  # Инициализация базы данных
 db.create_tables()
-
-# Добавление тестовых пользователей (выполните один раз для добавления тестовых данных)
-def add_test_users():
-    with db.get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-        INSERT INTO users (chat_id, username) VALUES (?, ?);
-        ''', (123456789, 'testuser1'))
-        cursor.execute('''
-        INSERT INTO users (chat_id, username) VALUES (?, ?);
-        ''', (987654321, 'testuser2'))
-        conn.commit()
-
-# Вызовите эту функцию один раз для добавления тестовых пользователей
-# add_test_users()
 
 @app.before_request
 def before_request():
@@ -66,10 +81,15 @@ def teardown_request(exception):
 
 @app.route('/')
 def index():
-    # Получаем список пользователей из базы данных
+    # Получаем статистику
+    user_count = db.get_user_count()
+    won_games_count = db.get_won_games_count()
+
+    # Получаем список пользователей
     users = db.get_all_users()
+
     # Отправляем данные в шаблон
-    return render_template('index.html', users=users)
+    return render_template('index.html', users=users, user_count=user_count, won_games_count=won_games_count)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8083)
+    app.run(host='0.0.0.0', port=8086)
